@@ -1,0 +1,118 @@
+#!/usr/bin/env python3
+
+import argparse
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+
+
+INSTALL_HERDR = """\
+set -eu
+version=$1
+expected="herdr $version"
+install_dir="$HOME/.local/bin"
+binary="$install_dir/herdr"
+if [ -x "$binary" ] && [ "$("$binary" --version)" = "$expected" ]; then
+    exit 0
+fi
+
+case "$(uname -s):$(uname -m)" in
+    Linux:aarch64) asset=herdr-linux-aarch64 ;;
+    Linux:x86_64) asset=herdr-linux-x86_64 ;;
+    *) echo "Herdr does not support this container platform." >&2; exit 1 ;;
+esac
+mkdir -p "$install_dir"
+tmp=$(mktemp "$install_dir/.herdr.XXXXXX")
+trap 'rm -f "$tmp"' EXIT
+curl -fsSL --retry 2 -o "$tmp" "https://github.com/herdrdev/herdr/releases/download/v$version/$asset"
+chmod 755 "$tmp"
+if [ "$("$tmp" --version)" != "$expected" ]; then
+    echo "The downloaded Herdr version does not match the host version." >&2
+    exit 1
+fi
+mv -f "$tmp" "$binary"
+"""
+
+
+def register_machine(workspace_id):
+    target = f"{workspace_id}.devpod"
+    result = subprocess.run(
+        ["herdr", "machine", "list", "--json"],
+        stdout=subprocess.PIPE, text=True, check=True,
+    )
+    machines = json.loads(result.stdout)
+    if not isinstance(machines, list) or any(
+        not isinstance(machine, dict) or not isinstance(machine.get("target"), str)
+        for machine in machines
+    ):
+        raise ValueError("Unexpected Herdr machine list format")
+
+    version = subprocess.check_output(["herdr", "--version"], text=True).strip()
+    match = re.fullmatch(r"herdr (\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?)", version, re.ASCII)
+    if match is None:
+        raise ValueError(f"Unsupported Herdr version format: {version}")
+    subprocess.run(
+        ["ssh", "-T", target, f"sh -s -- {match[1]}"],
+        input=INSTALL_HERDR, text=True, check=True,
+    )
+
+    if any(machine["target"] == target for machine in machines):
+        return
+
+    subprocess.run(
+        ["herdr", "machine", "add", target, "--remote-session", "default"],
+        check=True,
+    )
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Start a local DevPod workspace using the selected profile.")
+    parser.add_argument("profile", help="profile directory name, such as py-codex")
+    parser.add_argument("project", help="project directory to mount in the workspace")
+    args = parser.parse_args()
+
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]*", args.profile):
+        parser.error("profile names must start with a lowercase letter or digit and may contain lowercase letters, digits, and hyphens")
+
+    repo = Path(__file__).resolve().parent
+    config = repo / args.profile / ".devcontainer" / "devcontainer.json"
+    if not config.is_file():
+        parser.error(f"profile configuration not found: {config}")
+
+    project = Path(args.project).expanduser().resolve()
+    if not project.is_dir():
+        parser.error(f"project directory not found: {project}")
+
+    config_path = os.path.relpath(config, project)
+    identity = os.fsencode(config) + b"\0" + os.fsencode(project)
+    digest = hashlib.sha256(identity).hexdigest()[:12]
+    workspace_id = f"{args.profile[:24]}-{digest}"
+
+    command = [
+        "devpod", "up", str(project),
+        "--provider", "docker",
+        "--open-ide=false",
+        "--devcontainer-path", config_path,
+        "--id", workspace_id,
+    ]
+    try:
+        result = subprocess.run(command)
+    except OSError as error:
+        parser.exit(1, f"Could not start DevPod: {error.strerror}\n")
+    if result.returncode:
+        return result.returncode if result.returncode > 0 else 128 - result.returncode
+
+    try:
+        register_machine(workspace_id)
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        print(f"The DevPod workspace started. Herdr registration failed: {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,18 @@
+{
+  "name": "Python Codex Agent",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "remoteUser": "developer",
+  "workspaceFolder": "/workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind",
+  "containerEnv": {
+    "PYTHONUNBUFFERED": "1",
+    "PIP_DISABLE_PIP_VERSION_CHECK": "1"
+  },
+  "mounts": [
+    "source=${localEnv:HOME}/.codex/auth.json,target=/run/codex-master/auth.json,type=bind,readonly"
+  ],
+  "postStartCommand": ["bash", "/usr/local/bin/init-codex-auth.sh"]
+}
+
