@@ -1,3 +1,4 @@
+
 FROM python:3.12-slim-bookworm
 
 # Install development dependencies
@@ -14,22 +15,36 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/* /tmp/nodesource_setup.sh
 
-# Install OpenAI Codex CLI
-RUN npm install -g @openai/codex
-
 # Create non-root development user
 RUN useradd -m -s /bin/bash developer \
     && echo "developer ALL=(ALL) NOPASSWD:ALL" \
        > /etc/sudoers.d/developer \
     && chmod 0440 /etc/sudoers.d/developer
 
-# Prepare private Codex directory
-RUN mkdir -p /home/developer/.codex \
-    && chown -R developer:developer /home/developer/.codex \
-    && chmod 700 /home/developer/.codex
+# Prepare private Claude directory
+RUN mkdir -p /home/developer/.claude \
+    && chown -R developer:developer /home/developer/.claude \
+    && chmod 700 /home/developer/.claude
 
-COPY --chmod=0644 init-codex-auth.sh /usr/local/bin/init-codex-auth.sh
+# Load the OAuth token in every shell, including non-interactive SSH commands.
+# The block goes before Debian's interactive-only guard in ~/.bashrc.
+RUN { \
+      echo 'export PATH="$HOME/.local/bin:$PATH"'; \
+      echo 'if [ -r "$HOME/.claude/oauth-token" ]; then'; \
+      echo '  CLAUDE_CODE_OAUTH_TOKEN="$(cat "$HOME/.claude/oauth-token")"'; \
+      echo '  export CLAUDE_CODE_OAUTH_TOKEN'; \
+      echo 'fi'; \
+      cat /home/developer/.bashrc; \
+    } > /tmp/bashrc \
+    && install -o developer -g developer -m 0644 /tmp/bashrc /home/developer/.bashrc \
+    && rm /tmp/bashrc
+
+COPY --chmod=0644 init-claude-auth.sh /usr/local/bin/init-claude-auth.sh
 
 USER developer
 WORKDIR /home/developer
 
+# Install Claude Code (native build, user-owned so it can update itself)
+RUN curl -fsSL https://claude.ai/install.sh | bash
+
+ENV PATH="/home/developer/.local/bin:${PATH}"
