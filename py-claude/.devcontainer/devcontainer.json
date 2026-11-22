@@ -1,5 +1,5 @@
 {
-  "name": "Python Codex Agent",
+  "name": "Python Claude Agent",
   "build": {
     "dockerfile": "Dockerfile"
   },
@@ -11,7 +11,7 @@
     "PIP_DISABLE_PIP_VERSION_CHECK": "1"
   },
   "mounts": [
-    "source=${localEnv:HOME}/.codex/auth.json,target=/run/codex-master/auth.json,type=bind,readonly"
+    "source=${localEnv:HOME}/.claude/devpod-oauth-token,target=/run/claude-master/oauth-token,type=bind,readonly"
   ],
-  "postStartCommand": ["bash", "/usr/local/bin/init-codex-auth.sh"]
+  "postStartCommand": ["bash", "/usr/local/bin/init-claude-auth.sh"]
 }
