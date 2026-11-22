@@ -88,9 +88,9 @@ def main():
         parser.error(f"project directory not found: {project}")
 
     config_path = os.path.relpath(config, project)
-    identity = os.fsencode(config) + b"\0" + os.fsencode(project)
-    digest = hashlib.sha256(identity).hexdigest()[:12]
-    workspace_id = f"{args.profile[:24]}-{digest}"
+    name = re.sub(r"[^a-z0-9]+", "-", project.name.lower()).strip("-")[:20].strip("-") or "project"
+    digest = hashlib.sha256(os.fsencode(project)).hexdigest()[:4]
+    workspace_id = f"{name}-{digest}-{args.profile[:24]}"
 
     command = [
         "devpod", "up", str(project),
